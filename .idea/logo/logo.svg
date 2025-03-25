@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500">
+  <!-- Background Circle -->
+  <circle cx="250" cy="250" r="230" fill="#3B82F6" />
+  
+  <!-- Message Bubble Base -->
+  <path d="M150 250 
+           C150 300, 200 350, 250 350 
+           C300 350, 350 300, 350 250 
+           C350 200, 300 150, 250 150 
+           C200 150, 150 200, 150 250 Z" 
+        fill="white" />
+  
+  <!-- Connection Lines -->
+  <line x1="250" y1="200" x2="350" y2="150" stroke="white" stroke-width="20" stroke-linecap="round" />
+  <line x1="250" y1="250" x2="150" y2="200" stroke="white" stroke-width="20" stroke-linecap="round" />
+  <line x1="250" y1="300" x2="350" y2="350" stroke="white" stroke-width="20" stroke-linecap="round" />
+  
+  <!-- Subtle Shadow Effect -->
+  <circle cx="250" cy="250" r="230" fill="rgba(0,0,0,0.1)" />
+</svg>
