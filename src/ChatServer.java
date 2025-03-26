@@ -8,7 +8,7 @@ public class ChatServer {
             System.setProperty("java.security.policy", "server.policy");
             
             // Set the java.rmi.server.hostname property to the server's IP
-            System.setProperty("java.rmi.server.hostname", "192.168.1.7");
+            System.setProperty("java.rmi.server.hostname", "192.168.1.2");
             
             // Create and export the service
             ChatServiceImpl service = new ChatServiceImpl();
