@@ -5,4 +5,7 @@ import java.util.List;
 public interface ClientCallback extends Remote {
     void receiveMessage(String sender, String message) throws RemoteException;
     void updateClientList(List<String> clients) throws RemoteException;
+    
+    void ping() throws RemoteException;
 }
+
