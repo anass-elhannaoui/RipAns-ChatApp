@@ -630,6 +630,7 @@ private String toCodePoint(String emoji) {
         updateUI();
     }
 
+    
     private void playMessageSound() {
         if (notificationsEnabled) {
             Toolkit.getDefaultToolkit().beep();
