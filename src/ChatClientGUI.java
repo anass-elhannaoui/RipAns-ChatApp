@@ -11,11 +11,13 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import javax.swing.border.*;
+import javax.swing.plaf.basic.BasicTextFieldUI;
 import javax.swing.text.*;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import javax.imageio.ImageIO;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.File;
 import java.net.URL;
 import java.util.regex.Pattern;
@@ -25,7 +27,6 @@ public class ChatClientGUI extends JFrame {
     // Performance tuning fields
     private boolean needsFullUIUpdate = false;
     private static final boolean DEBUG_MODE = false;
-    
     // UI Components
     private String name;
     private ChatService service;
@@ -59,7 +60,14 @@ public class ChatClientGUI extends JFrame {
     private static final String TWEMOJI_CDN = "https://twemoji.maxcdn.com/v/latest/72x72/";
     private static final String TWEMOJI_EXT = ".png";
     private static final Map<String, ImageIcon> emojiCache = new HashMap<>();
-    private static final Pattern EMOJI_PATTERN = Pattern.compile("[\uD83C-\uDBFF\uDC00-\uDFFF]+");
+    // Update the EMOJI_PATTERN to handle all modern emoji types
+    private static final Pattern EMOJI_PATTERN = Pattern.compile(
+        "[\uD83C-\uDBFF\uDC00-\uDFFF]+|" +  // Standard emojis
+        "[\u20E3\uFE0F]|" +                 // Variation selectors
+        "(?:[\uD83D\uD83E][\uDC00-\uDFFF]|" +  // Surrogate pairs
+        "[\uD83C][\uDFFB-\uDFFF]|" +        // Skin tone modifiers
+        "[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF])" // Flags
+    );
 
     public ChatClientGUI(String name, String serverIP) {
         this.name = name;
@@ -325,63 +333,38 @@ public class ChatClientGUI extends JFrame {
     
         return emojiPanel;
     }
-
-private ImageIcon getTwemojiImage(String emoji) {
+   private ImageIcon getTwemojiImage(String emoji) {
     return emojiCache.computeIfAbsent(emoji, e -> {
         try {
             String codePoint = toCodePoint(emoji);
             
-            // Multiple paths to try loading the emoji
-            String[] possiblePaths = {
-                "/assets/twemoji/72x72/" + codePoint + ".png",  // Primary path
-                "/twemoji/" + codePoint + ".png",         // Alternative path
-                "assets/twemoji/" + codePoint + ".png",   // Another possible path
-                "twemoji/" + codePoint + ".png"           // Yet another path
-            };
-            
-            for (String path : possiblePaths) {
-                URL url = getClass().getResource(path);
-                if (url != null) {
-                    if (DEBUG_MODE) {
-                        System.out.println("Attempting to load emoji from path: " + path);
-                    }
-                    
-                    Image image = ImageIO.read(url);
-                    return new ImageIcon(image.getScaledInstance(24, 24, Image.SCALE_SMOOTH));
-                } else if (DEBUG_MODE) {
-                    System.out.println("URL not found for path: " + path);
-                }
+            // Try loading from resources first
+            InputStream is = getClass().getResourceAsStream(
+                "/assets/twemoji/72x72/" + codePoint + ".png");
+            if (is == null) {
+                is = getClass().getResourceAsStream(
+                    "/twemoji/" + codePoint + ".png");
             }
             
-            // Fallback logging if no emoji found
-            if (DEBUG_MODE) {
-                System.err.println("No emoji found for code point: " + codePoint);
-                
-                // Alternative debugging to list resources
+            if (is != null) {
                 try {
-                    Enumeration<URL> resources = getClass().getClassLoader().getResources("twemoji");
-                    if (resources.hasMoreElements()) {
-                        System.out.println("Twemoji resources found:");
-                        while (resources.hasMoreElements()) {
-                            System.out.println(resources.nextElement());
-                        }
-                    } else {
-                        System.out.println("No twemoji resources found in classpath");
-                    }
-                } catch (IOException ioEx) {
-                    ioEx.printStackTrace();
+                    BufferedImage image = ImageIO.read(is);
+                    return new ImageIcon(image.getScaledInstance(24, 24, Image.SCALE_SMOOTH));
+                } finally {
+                    is.close();
                 }
             }
-        } catch (IOException | NullPointerException ex) {
+            
+            // Fallback to system emoji font if image not available
+            return null;
+        } catch (IOException ex) {
             if (DEBUG_MODE) {
-                System.err.println("Error loading Twemoji: " + ex.getMessage());
-                ex.printStackTrace();
+                System.err.println("Error loading emoji: " + ex.getMessage());
             }
+            return null;
         }
-        return null;
     });
 }
-
 private String toCodePoint(String emoji) {
     StringBuilder sb = new StringBuilder();
     emoji.codePoints()
@@ -832,44 +815,113 @@ private String toCodePoint(String emoji) {
         }
     }
 
-    private void styleTextField(JTextField field) {
-        Font font = getEmojiFont(14);
-        field.setFont(font);
-        field.setBorder(new EmptyBorder(5, 10, 5, 10));
-        field.setOpaque(false);
-    
-        field.setText("Type a message");
-        field.setForeground(new Color(150, 150, 150));
-    
-        field.addFocusListener(new FocusAdapter() {
-            @Override
-            public void focusGained(FocusEvent e) {
-                if (field.getText().equals("Type a message")) {
-                    field.setText("");
-                    field.setForeground(Color.BLACK);
-                }
+  private void styleTextField(JTextField field) {
+    // Create a custom UI that handles emoji rendering
+    field.setUI(new BasicTextFieldUI() {
+        @Override
+        protected void paintSafely(Graphics g) {
+            Graphics2D g2 = (Graphics2D)g;
+            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, 
+                               RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            
+            // Paint the background
+            g2.setColor(new Color(255, 255, 255, 200));
+            g2.fillRoundRect(0, 0, field.getWidth(), field.getHeight(), 10, 10);
+            
+            // Paint the text with emoji support
+            paintTextWithEmojis(g2);
+            
+            // Paint the border if needed
+            if (field.getBorder() != null) {
+                field.getBorder().paintBorder(field, g, 0, 0, 
+                                           field.getWidth(), field.getHeight());
             }
-    
-            @Override
-            public void focusLost(FocusEvent e) {
-                if (field.getText().isEmpty()) {
-                    field.setText("Type a message");
-                    field.setForeground(new Color(150, 150, 150));
-                }
+        }
+        
+        private void paintTextWithEmojis(Graphics2D g2) {
+            String text = field.getText();
+            if (text.isEmpty() || text.equals("Type a message")) {
+                g2.setColor(new Color(150, 150, 150));
+                g2.setFont(DEFAULT_FONT);
+                g2.drawString("Type a message", 10, 
+                            field.getBaseline(field.getWidth(), field.getHeight()));
+                return;
             }
-        });
-    
-        field.addKeyListener(new KeyAdapter() {
-            @Override
-            public void keyPressed(KeyEvent e) {
-                if (field.getText().equals("Type a message")) {
-                    field.setText("");
-                    field.setForeground(Color.BLACK);
+            
+            // Split text into emoji and non-emoji segments
+            Matcher matcher = EMOJI_PATTERN.matcher(text);
+            int lastPos = 0;
+            int x = 5;
+            
+            while (matcher.find()) {
+                // Draw regular text before emoji
+                if (lastPos < matcher.start()) {
+                    String regularText = text.substring(lastPos, matcher.start());
+                    g2.setFont(DEFAULT_FONT);
+                    g2.setColor(Color.BLACK);
+                    x += drawString(g2, regularText, x, 
+                                  field.getBaseline(field.getWidth(), field.getHeight()));
                 }
+                
+                // Draw emoji
+                String emoji = matcher.group();
+                ImageIcon emojiIcon = getTwemojiImage(emoji);
+                if (emojiIcon != null) {
+                    g2.drawImage(emojiIcon.getImage(), x, 5, 
+                                emojiIcon.getIconWidth(), emojiIcon.getIconHeight(), null);
+                    x += emojiIcon.getIconWidth();
+                } else {
+                    // Fallback to system emoji font
+                    g2.setFont(getEmojiFont(field.getFont().getSize()));
+                    g2.setColor(Color.BLACK);
+                    x += drawString(g2, emoji, x, 
+                                  field.getBaseline(field.getWidth(), field.getHeight()));
+                }
+                
+                lastPos = matcher.end();
             }
-        });
-    }
+            
+            // Draw remaining text
+            if (lastPos < text.length()) {
+                String remainingText = text.substring(lastPos);
+                g2.setFont(DEFAULT_FONT);
+                g2.setColor(Color.BLACK);
+                drawString(g2, remainingText, x, 
+                           field.getBaseline(field.getWidth(), field.getHeight()));
+            }
+        }
+        
+        private int drawString(Graphics2D g2, String text, int x, int y) {
+            FontMetrics fm = g2.getFontMetrics();
+            g2.drawString(text, x, y);
+            return fm.stringWidth(text);
+        }
+    });
     
+    // Set initial properties
+    field.setFont(DEFAULT_FONT);
+    field.setBorder(new EmptyBorder(5, 10, 5, 10));
+    field.setOpaque(false);
+    
+    // Add focus listeners for placeholder text
+    field.addFocusListener(new FocusAdapter() {
+        @Override
+        public void focusGained(FocusEvent e) {
+            if (field.getText().equals("Type a message")) {
+                field.setText("");
+                field.setForeground(Color.BLACK);
+            }
+        }
+        
+        @Override
+        public void focusLost(FocusEvent e) {
+            if (field.getText().isEmpty()) {
+                field.setText("Type a message");
+                field.setForeground(new Color(150, 150, 150));
+            }
+        }
+    });
+}
     private void addHoverEffects(AbstractButton button) {
         button.addMouseListener(new MouseAdapter() {
             private Color originalFg = button.getForeground();
@@ -991,6 +1043,7 @@ private String toCodePoint(String emoji) {
         int lastPos = 0;
         
         while (matcher.find()) {
+            // Add any non-emoji text before the emoji
             if (lastPos < matcher.start()) {
                 doc.insertString(doc.getLength(), 
                     message.substring(lastPos, matcher.start()), 
@@ -1005,6 +1058,7 @@ private String toCodePoint(String emoji) {
                 StyleConstants.setIcon(emojiStyle, emojiIcon);
                 doc.insertString(doc.getLength(), " ", emojiStyle);
             } else {
+                // Fallback to system emoji font if image not available
                 Style fallbackStyle = doc.addStyle("EmojiFallback", doc.getStyle("Message"));
                 StyleConstants.setFontFamily(fallbackStyle, getEmojiFont(14).getFamily());
                 doc.insertString(doc.getLength(), emoji, fallbackStyle);
@@ -1013,13 +1067,13 @@ private String toCodePoint(String emoji) {
             lastPos = matcher.end();
         }
         
+        // Add any remaining text after the last emoji
         if (lastPos < message.length()) {
             doc.insertString(doc.getLength(), 
                 message.substring(lastPos), 
                 doc.getStyle("Message"));
         }
     }
-
     public void updateClientList(List<String> clients) {
         SwingUtilities.invokeLater(() -> {
             userListModel.clear();
