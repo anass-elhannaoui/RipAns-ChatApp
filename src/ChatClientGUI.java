@@ -11,21 +11,24 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 import javax.swing.border.*;
+import javax.swing.plaf.basic.BasicTextFieldUI;
 import javax.swing.text.*;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import javax.imageio.ImageIO;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.File;
 import java.net.URL;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
 import java.net.URI;
+
 public class ChatClientGUI extends JFrame {
     // Performance tuning fields
     private boolean needsFullUIUpdate = false;
     private static final boolean DEBUG_MODE = false;
-    
+
     // UI Components
     private String name;
     private ChatService service;
@@ -37,6 +40,7 @@ public class ChatClientGUI extends JFrame {
     private JButton settingsButton;
     private JButton changeNameButton;
     private JButton okButton;
+    private JButton exitPrivateButton;
     private JList<UserListItem> userList;
     private DefaultListModel<UserListItem> userListModel;
     private JLabel statusLabel;
@@ -46,7 +50,8 @@ public class ChatClientGUI extends JFrame {
     private JPanel messagePanel;
     private boolean emojiPanelVisible = false;
     private boolean notificationsEnabled = true;
-    
+    private String currentRecipient = null;
+
     // Modern theme settings with vibrant colors and gradients
     private Color THEME_COLOR = new Color(100, 149, 237);
     private Color THEME_SECONDARY = new Color(65, 105, 225);
@@ -59,7 +64,14 @@ public class ChatClientGUI extends JFrame {
     private static final String TWEMOJI_CDN = "https://twemoji.maxcdn.com/v/latest/72x72/";
     private static final String TWEMOJI_EXT = ".png";
     private static final Map<String, ImageIcon> emojiCache = new HashMap<>();
-    private static final Pattern EMOJI_PATTERN = Pattern.compile("[\uD83C-\uDBFF\uDC00-\uDFFF]+");
+    private static final Pattern EMOJI_PATTERN = Pattern.compile(
+            "(?:[\uD83C-\uDBFF\uDC00-\uDFFF]+|" + // Standard emojis
+                    "[\u20E3\uFE0F]|" + // Variation selectors
+                    "(?:[\uD83D\uD83E][\uDC00-\uDFFF]|" + // Surrogate pairs
+                    "[\uD83C][\uDFFB-\uDFFF]|" + // Skin tone modifiers
+                    "[\uD83C][\uDDE6-\uDDFF][\uD83C][\uDDE6-\uDDFF])" + // Flags
+                    ")+" // Match one or more consecutive emojis
+    );
 
     public ChatClientGUI(String name, String serverIP) {
         this.name = name;
@@ -67,13 +79,14 @@ public class ChatClientGUI extends JFrame {
         setAppIcon();
         connectToServer(serverIP);
         NotificationUtil.initTrayIcon(this);
+        setupUserListContextMenu();
     }
 
     private void setAppIcon() {
         try {
             Image icon = ImageIO.read(getClass().getResource("/assets/logo.png"));
             setIconImage(icon);
-            
+
             if (Taskbar.isTaskbarSupported()) {
                 Taskbar taskbar = Taskbar.getTaskbar();
                 if (taskbar.isSupported(Taskbar.Feature.ICON_IMAGE)) {
@@ -97,7 +110,7 @@ public class ChatClientGUI extends JFrame {
         setSize(950, 720);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLocationRelativeTo(null);
-        
+
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
             UIManager.put("Button.arc", 15);
@@ -142,9 +155,8 @@ public class ChatClientGUI extends JFrame {
                 Graphics2D g2d = (Graphics2D) g;
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 GradientPaint gradient = new GradientPaint(
-                    0, 0, THEME_COLOR, 
-                    getWidth(), 0, THEME_SECONDARY
-                );
+                        0, 0, THEME_COLOR,
+                        getWidth(), 0, THEME_SECONDARY);
                 g2d.setPaint(gradient);
                 g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 0, 0);
                 super.paintComponent(g);
@@ -186,7 +198,7 @@ public class ChatClientGUI extends JFrame {
             return null;
         }
     }
-    
+
     private JButton createIconButton(String iconFile, String tooltip, int iconSize) {
         JButton button = new JButton() {
             @Override
@@ -199,7 +211,7 @@ public class ChatClientGUI extends JFrame {
                 super.paintComponent(g);
             }
         };
-        
+
         button.setToolTipText(tooltip);
         ImageIcon icon = loadIcon(iconFile, iconSize);
         if (icon != null) {
@@ -207,12 +219,12 @@ public class ChatClientGUI extends JFrame {
         } else {
             button.setText(tooltip);
         }
-        
+
         button.setOpaque(false);
         button.setContentAreaFilled(false);
         button.setBorderPainted(false);
         button.setBackground(new Color(0, 0, 0, 0));
-        
+
         styleButton(button);
         return button;
     }
@@ -252,7 +264,7 @@ public class ChatClientGUI extends JFrame {
         chatPanel.setOpaque(false);
         chatPanel.add(chatScrollPane, BorderLayout.CENTER);
         chatPanel.add(createEmojiPanel(), BorderLayout.SOUTH);
-        
+
         return chatPanel;
     }
 
@@ -269,6 +281,10 @@ public class ChatClientGUI extends JFrame {
         Style userStyle = doc.addStyle("User", defaultStyle);
         StyleConstants.setForeground(userStyle, THEME_COLOR.darker());
         StyleConstants.setBold(userStyle, true);
+
+        Style privateUserStyle = doc.addStyle("PrivateUser", defaultStyle);
+        StyleConstants.setForeground(privateUserStyle, new Color(160, 0, 200));
+        StyleConstants.setBold(privateUserStyle, true);
 
         Style messageStyle = doc.addStyle("Message", defaultStyle);
         StyleConstants.setForeground(messageStyle, new Color(60, 60, 60));
@@ -292,19 +308,18 @@ public class ChatClientGUI extends JFrame {
         };
         emojiPanel.setOpaque(false);
         emojiPanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(220, 220, 220, 150)),
-            BorderFactory.createEmptyBorder(10, 10, 10, 10)
-        ));
+                BorderFactory.createLineBorder(new Color(220, 220, 220, 150)),
+                BorderFactory.createEmptyBorder(10, 10, 10, 10)));
         emojiPanel.setPreferredSize(new Dimension(getWidth(), 90));
         emojiPanel.setVisible(false);
-    
+
         String[] emojis = { "😀", "😃", "❤️", "👍", "🎉", "🔥", "👋", "😊",
-                          "😎", "🤔", "😕", "😢", "🥰", "🙏", "💔", "✨" };
-    
+                "😎", "🤔", "😕", "😢", "🥰", "🙏", "💔", "✨" };
+
         for (String emoji : emojis) {
             ImageIcon emojiIcon = getTwemojiImage(emoji);
             JButton emojiButton;
-            
+
             if (emojiIcon != null) {
                 emojiButton = new JButton(emojiIcon);
                 emojiButton.setPreferredSize(new Dimension(32, 32));
@@ -312,89 +327,65 @@ public class ChatClientGUI extends JFrame {
                 emojiButton = new JButton(emoji);
                 emojiButton.setFont(getEmojiFont(20));
             }
-            
+
             emojiButton.setOpaque(false);
             emojiButton.setContentAreaFilled(false);
             emojiButton.setBorderPainted(false);
             emojiButton.setBorder(new EmptyBorder(5, 5, 5, 5));
             emojiButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
-            
+
             emojiButton.addActionListener(e -> addEmojiToMessage(emoji));
             emojiPanel.add(emojiButton);
         }
-    
+
         return emojiPanel;
     }
 
-private ImageIcon getTwemojiImage(String emoji) {
-    return emojiCache.computeIfAbsent(emoji, e -> {
-        try {
-            String codePoint = toCodePoint(emoji);
-            
-            // Multiple paths to try loading the emoji
-            String[] possiblePaths = {
-                "/assets/twemoji/72x72/" + codePoint + ".png",  // Primary path
-                "/twemoji/" + codePoint + ".png",         // Alternative path
-                "assets/twemoji/" + codePoint + ".png",   // Another possible path
-                "twemoji/" + codePoint + ".png"           // Yet another path
-            };
-            
-            for (String path : possiblePaths) {
-                URL url = getClass().getResource(path);
-                if (url != null) {
-                    if (DEBUG_MODE) {
-                        System.out.println("Attempting to load emoji from path: " + path);
-                    }
-                    
-                    Image image = ImageIO.read(url);
-                    return new ImageIcon(image.getScaledInstance(24, 24, Image.SCALE_SMOOTH));
-                } else if (DEBUG_MODE) {
-                    System.out.println("URL not found for path: " + path);
-                }
-            }
-            
-            // Fallback logging if no emoji found
-            if (DEBUG_MODE) {
-                System.err.println("No emoji found for code point: " + codePoint);
-                
-                // Alternative debugging to list resources
-                try {
-                    Enumeration<URL> resources = getClass().getClassLoader().getResources("twemoji");
-                    if (resources.hasMoreElements()) {
-                        System.out.println("Twemoji resources found:");
-                        while (resources.hasMoreElements()) {
-                            System.out.println(resources.nextElement());
-                        }
-                    } else {
-                        System.out.println("No twemoji resources found in classpath");
-                    }
-                } catch (IOException ioEx) {
-                    ioEx.printStackTrace();
-                }
-            }
-        } catch (IOException | NullPointerException ex) {
-            if (DEBUG_MODE) {
-                System.err.println("Error loading Twemoji: " + ex.getMessage());
-                ex.printStackTrace();
-            }
-        }
-        return null;
-    });
-}
+    private ImageIcon getTwemojiImage(String emoji) {
+        return emojiCache.computeIfAbsent(emoji, e -> {
+            try {
+                String codePoint = toCodePoint(emoji);
 
-private String toCodePoint(String emoji) {
-    StringBuilder sb = new StringBuilder();
-    emoji.codePoints()
-         .mapToObj(cp -> String.format("%x", cp))
-         .forEach(sb::append);
-    return sb.toString();
-}
+                InputStream is = getClass().getResourceAsStream(
+                        "/assets/twemoji/72x72/" + codePoint + ".png");
+                if (is == null) {
+                    is = getClass().getResourceAsStream(
+                            "/twemoji/" + codePoint + ".png");
+                }
+
+                if (is != null) {
+                    try {
+                        BufferedImage image = ImageIO.read(is);
+                        return new ImageIcon(image.getScaledInstance(16, 16, Image.SCALE_SMOOTH));
+                    } finally {
+                        is.close();
+                    }
+                }
+
+                return null;
+            } catch (IOException ex) {
+                if (DEBUG_MODE) {
+                    System.err.println("Error loading emoji: " + ex.getMessage());
+                }
+                return null;
+            }
+        });
+    }
+
+    private String toCodePoint(String emoji) {
+        StringBuilder sb = new StringBuilder();
+        emoji.codePoints()
+                .mapToObj(cp -> String.format("%x", cp))
+                .forEach(sb::append);
+        return sb.toString();
+    }
+
     private Font getEmojiFont(int size) {
         String[] emojiFonts = {
-            "Segoe UI Emoji", "Apple Color Emoji", 
-            "Noto Color Emoji", "EmojiOne"
+                "Segoe UI Emoji", "Apple Color Emoji",
+                "Noto Color Emoji", "EmojiOne"
         };
-    
+
         for (String fontName : emojiFonts) {
             Font font = new Font(fontName, Font.PLAIN, size);
             if (font.getFamily().equals(fontName)) {
@@ -427,22 +418,20 @@ private String toCodePoint(String emoji) {
         userScrollPane.getViewport().setOpaque(false);
         userScrollPane.setPreferredSize(new Dimension(220, getHeight()));
         userScrollPane.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createEmptyBorder(5, 5, 5, 5),
-            BorderFactory.createMatteBorder(1, 1, 1, 1, new Color(220, 220, 220))
-        ));
+                BorderFactory.createEmptyBorder(5, 5, 5, 5),
+                BorderFactory.createMatteBorder(1, 1, 1, 1, new Color(220, 220, 220))));
 
         JPanel userPanel = new JPanel(new BorderLayout());
         userPanel.setOpaque(false);
-        
+
         userPanelHeader = new JLabel("Online Users", SwingConstants.CENTER) {
             @Override
             protected void paintComponent(Graphics g) {
                 Graphics2D g2d = (Graphics2D) g;
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 GradientPaint gradient = new GradientPaint(
-                    0, 0, THEME_COLOR, 
-                    getWidth(), 0, THEME_SECONDARY
-                );
+                        0, 0, THEME_COLOR,
+                        getWidth(), 0, THEME_SECONDARY);
                 g2d.setPaint(gradient);
                 g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 0, 0);
                 super.paintComponent(g);
@@ -454,10 +443,10 @@ private String toCodePoint(String emoji) {
         userPanelHeader.setBorder(new EmptyBorder(12, 0, 12, 0));
         userPanel.add(userPanelHeader, BorderLayout.NORTH);
         userPanel.add(userScrollPane, BorderLayout.CENTER);
-        
+
         return userPanel;
     }
-    
+
     private JPanel createMessageInputPanel() {
         messagePanel = new JPanel(new BorderLayout(15, 0)) {
             @Override
@@ -471,10 +460,14 @@ private String toCodePoint(String emoji) {
         };
         messagePanel.setOpaque(false);
         messagePanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(220, 220, 220)),
-            BorderFactory.createEmptyBorder(15, 15, 15, 15)
-        ));
-    
+                BorderFactory.createMatteBorder(1, 0, 0, 0, new Color(220, 220, 220)),
+                BorderFactory.createEmptyBorder(15, 15, 15, 15)));
+
+        exitPrivateButton = createIconButton("/assets/exit-private.png", "Exit Private Chat", 24);
+        exitPrivateButton.addActionListener(e -> clearPrivateChat());
+        exitPrivateButton.setVisible(false);
+        messagePanel.add(exitPrivateButton, BorderLayout.WEST);
+
         JPanel inputPanel = new JPanel(new BorderLayout(10, 0));
         inputPanel.setOpaque(false);
         messageField = new JTextField() {
@@ -488,23 +481,62 @@ private String toCodePoint(String emoji) {
             }
         };
         styleTextField(messageField);
-        
+
         emojiButton = createIconButton("/assets/emojies-icon.png", "Insert Emoji", 28);
         emojiButton.addActionListener(e -> toggleEmojiPanel());
         inputPanel.add(messageField, BorderLayout.CENTER);
         inputPanel.add(emojiButton, BorderLayout.WEST);
         messagePanel.add(inputPanel, BorderLayout.CENTER);
-    
+
         sendButton = createStyledButton("Send", "Send Message");
         styleButton(sendButton);
         sendButton.setFont(new Font("Segoe UI", Font.BOLD, 14));
         sendButton.setPreferredSize(new Dimension(100, 45));
         sendButton.addActionListener(e -> sendMessage());
-    
+
         addHoverEffects(sendButton);
         messagePanel.add(sendButton, BorderLayout.EAST);
-        
+
         return messagePanel;
+    }
+
+    private void setupUserListContextMenu() {
+        JPopupMenu contextMenu = new JPopupMenu();
+        JMenuItem privateMessageItem = new JMenuItem("Send Private Message");
+
+        privateMessageItem.addActionListener(e -> {
+            UserListItem selectedUser = userList.getSelectedValue();
+            if (selectedUser != null && !selectedUser.getUsername().equals(name)) {
+                setCurrentRecipient(selectedUser.getUsername());
+            }
+        });
+
+        contextMenu.add(privateMessageItem);
+
+        userList.addMouseListener(new MouseAdapter() {
+            public void mouseClicked(MouseEvent e) {
+                if (SwingUtilities.isRightMouseButton(e)) {
+                    int index = userList.locationToIndex(e.getPoint());
+                    if (index != -1) {
+                        userList.setSelectedIndex(index);
+                        contextMenu.show(userList, e.getX(), e.getY());
+                    }
+                }
+            }
+        });
+    }
+
+    private void setCurrentRecipient(String recipient) {
+        currentRecipient = recipient;
+        statusLabel.setText("Private chat with: " + currentRecipient);
+        exitPrivateButton.setVisible(true);
+        messageField.requestFocus();
+    }
+
+    private void clearPrivateChat() {
+        currentRecipient = null;
+        statusLabel.setText("Connected as: " + name);
+        exitPrivateButton.setVisible(false);
     }
 
     private void setupWindowListeners() {
@@ -524,7 +556,7 @@ private String toCodePoint(String emoji) {
             service = (ChatService) registry.lookup("ChatService");
             callback = new ClientCallbackImpl(this);
             service.registerClient(name, callback);
-            displayMessage("SERVER", "Connected to chat server as " + name);
+            displayMessage("SERVER", "Connected to chat server as " + name, false);
         } catch (RemoteException | NotBoundException e) {
             JOptionPane.showMessageDialog(this,
                     "Error connecting to server: " + e.getMessage(),
@@ -539,8 +571,9 @@ private String toCodePoint(String emoji) {
             if (needsFullUIUpdate) {
                 SwingUtilities.updateComponentTreeUI(this);
                 needsFullUIUpdate = false;
+                applyEmojiTextFieldUI(messageField);
             }
-            
+
             updateAllComponentStyles();
             revalidate();
             repaint();
@@ -551,19 +584,19 @@ private String toCodePoint(String emoji) {
         synchronized (getTreeLock()) {
             getContentPane().setBackground(BACKGROUND_COLOR);
             chatArea.setBackground(BACKGROUND_COLOR);
-            
             updateButtonStyles();
         }
     }
 
     private void updateButtonStyles() {
-        Component[] buttons = {sendButton, emojiButton, settingsButton, changeNameButton, okButton};
+        Component[] buttons = { sendButton, emojiButton, settingsButton, changeNameButton, okButton,
+                exitPrivateButton };
         for (Component comp : buttons) {
             if (comp != null && comp instanceof AbstractButton) {
                 AbstractButton button = (AbstractButton) comp;
                 button.setForeground(THEME_COLOR);
                 button.setFont(DEFAULT_FONT);
-                
+
                 if (button.getIcon() != null) {
                     button.setContentAreaFilled(false);
                     button.setOpaque(false);
@@ -580,47 +613,26 @@ private String toCodePoint(String emoji) {
                 THEME_SECONDARY = new Color(0, 200, 255);
                 BACKGROUND_COLOR = new Color(230, 245, 255);
                 MESSAGE_PANEL_COLOR = new Color(210, 235, 255);
-                currentGradient = new GradientPaint(0, 0, new Color(0, 180, 255), getWidth(), 0, new Color(0, 120, 200));
+                currentGradient = new GradientPaint(0, 0, new Color(0, 180, 255), getWidth(), 0,
+                        new Color(0, 120, 200));
                 break;
-                
-            case "Sunset Glow":
-                THEME_COLOR = new Color(255, 100, 50);
-                THEME_SECONDARY = new Color(255, 50, 100);
-                BACKGROUND_COLOR = new Color(255, 240, 230);
-                MESSAGE_PANEL_COLOR = new Color(255, 230, 220);
-                currentGradient = new GradientPaint(0, 0, new Color(255, 120, 80), getWidth(), 0, new Color(255, 80, 120));
-                break;
-                
+
             case "Emerald Forest":
                 THEME_COLOR = new Color(0, 180, 120);
                 THEME_SECONDARY = new Color(0, 150, 100);
                 BACKGROUND_COLOR = new Color(230, 255, 240);
                 MESSAGE_PANEL_COLOR = new Color(220, 250, 230);
-                currentGradient = new GradientPaint(0, 0, new Color(0, 200, 140), getWidth(), 0, new Color(0, 160, 110));
+                currentGradient = new GradientPaint(0, 0, new Color(0, 200, 140), getWidth(), 0,
+                        new Color(0, 160, 110));
                 break;
-                
+
             case "Purple Haze":
                 THEME_COLOR = new Color(150, 50, 200);
                 THEME_SECONDARY = new Color(200, 50, 150);
                 BACKGROUND_COLOR = new Color(245, 230, 255);
                 MESSAGE_PANEL_COLOR = new Color(235, 220, 250);
-                currentGradient = new GradientPaint(0, 0, new Color(170, 70, 220), getWidth(), 0, new Color(220, 70, 170));
-                break;
-                
-            case "Midnight Sky":
-                THEME_COLOR = new Color(30, 30, 50);
-                THEME_SECONDARY = new Color(50, 30, 70);
-                BACKGROUND_COLOR = new Color(40, 40, 60);
-                MESSAGE_PANEL_COLOR = new Color(50, 50, 70);
-                currentGradient = new GradientPaint(0, 0, new Color(40, 40, 80), getWidth(), 0, new Color(30, 30, 60));
-                break;
-                
-            case "Neon Cyber":
-                THEME_COLOR = new Color(0, 255, 200);
-                THEME_SECONDARY = new Color(200, 0, 255);
-                BACKGROUND_COLOR = new Color(20, 20, 30);
-                MESSAGE_PANEL_COLOR = new Color(30, 30, 40);
-                currentGradient = new GradientPaint(0, 0, new Color(0, 255, 180), getWidth(), 0, new Color(180, 0, 255));
+                currentGradient = new GradientPaint(0, 0, new Color(170, 70, 220), getWidth(), 0,
+                        new Color(220, 70, 170));
                 break;
         }
         needsFullUIUpdate = true;
@@ -633,17 +645,17 @@ private String toCodePoint(String emoji) {
             case "Large" -> 16;
             default -> 14;
         };
-        
+
         DEFAULT_FONT = new Font("Segoe UI", Font.PLAIN, size);
-        
         chatArea.setFont(DEFAULT_FONT);
         messageField.setFont(DEFAULT_FONT);
         userList.setFont(DEFAULT_FONT);
-        
+
         StyledDocument doc = chatArea.getStyledDocument();
         StyleConstants.setFontSize(doc.getStyle(StyleContext.DEFAULT_STYLE), size);
         StyleConstants.setFontSize(doc.getStyle("Time"), size - 2);
-        
+
+        applyEmojiTextFieldUI(messageField);
         updateUI();
     }
 
@@ -659,12 +671,12 @@ private String toCodePoint(String emoji) {
         settingsDialog.setLocationRelativeTo(this);
         settingsDialog.setLayout(new BorderLayout(15, 15));
         settingsDialog.getContentPane().setBackground(BACKGROUND_COLOR);
-    
+
         JPanel settingsPanel = new JPanel();
         settingsPanel.setLayout(new BoxLayout(settingsPanel, BoxLayout.Y_AXIS));
         settingsPanel.setBorder(new EmptyBorder(20, 20, 20, 20));
         settingsPanel.setBackground(MESSAGE_PANEL_COLOR);
-    
+
         // Change Username Section
         JPanel usernamePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         usernamePanel.setBackground(MESSAGE_PANEL_COLOR);
@@ -675,7 +687,7 @@ private String toCodePoint(String emoji) {
         changeNameButton = createStyledButton("Apply", "Change Username");
         styleButton(changeNameButton);
         addHoverEffects(changeNameButton);
-    
+
         changeNameButton.addActionListener(e -> {
             String newName = usernameField.getText().trim();
             if (!newName.isEmpty() && !newName.equals(name)) {
@@ -700,37 +712,34 @@ private String toCodePoint(String emoji) {
                         JOptionPane.WARNING_MESSAGE);
             }
         });
-    
+
         usernamePanel.add(usernameLabel);
         usernamePanel.add(usernameField);
         usernamePanel.add(changeNameButton);
         settingsPanel.add(usernamePanel);
-    
+
         settingsPanel.add(Box.createVerticalStrut(15));
-    
+
         // Theme Selection Section
         JPanel themePanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         themePanel.setBackground(MESSAGE_PANEL_COLOR);
         JLabel themeLabel = new JLabel("Select Theme: ");
         themeLabel.setFont(DEFAULT_FONT);
-        String[] themes = { 
-            "Ocean Wave", "Sunset Glow", "Emerald Forest", 
-            "Purple Haze", "Midnight Sky", "Neon Cyber"
-        };
+        String[] themes = { "Ocean Wave", "Emerald Forest", "Purple Haze" };
         JComboBox<String> themeCombo = new JComboBox<>(themes);
         themeCombo.setFont(DEFAULT_FONT);
-    
+
         themeCombo.addActionListener(e -> {
             String selectedTheme = (String) themeCombo.getSelectedItem();
             applyTheme(selectedTheme);
         });
-    
+
         themePanel.add(themeLabel);
         themePanel.add(themeCombo);
         settingsPanel.add(themePanel);
-    
+
         settingsPanel.add(Box.createVerticalStrut(15));
-    
+
         // Font Size Selection Section
         JPanel fontPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         fontPanel.setBackground(MESSAGE_PANEL_COLOR);
@@ -740,25 +749,25 @@ private String toCodePoint(String emoji) {
         JComboBox<String> fontCombo = new JComboBox<>(fontSizes);
         fontCombo.setFont(DEFAULT_FONT);
         fontCombo.setSelectedItem("Medium");
-    
+
         fontCombo.addActionListener(e -> {
             String selectedFontSize = (String) fontCombo.getSelectedItem();
             applyFontSize(selectedFontSize);
         });
-    
+
         fontPanel.add(fontLabel);
         fontPanel.add(fontCombo);
         settingsPanel.add(fontPanel);
-    
+
         settingsPanel.add(Box.createVerticalStrut(15));
-    
+
         // Notification Settings Section
         JPanel notificationPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         notificationPanel.setBackground(MESSAGE_PANEL_COLOR);
         JCheckBox notificationCheck = new JCheckBox("Enable Notifications");
         notificationCheck.setFont(DEFAULT_FONT);
         notificationCheck.setSelected(notificationsEnabled);
-    
+
         notificationCheck.addActionListener(e -> {
             notificationsEnabled = notificationCheck.isSelected();
             NotificationUtil.setNotificationsEnabled(notificationsEnabled);
@@ -766,24 +775,24 @@ private String toCodePoint(String emoji) {
                 playMessageSound();
             }
         });
-    
+
         notificationPanel.add(notificationCheck);
         settingsPanel.add(notificationPanel);
-    
+
         settingsPanel.add(Box.createVerticalStrut(20));
-    
+
         // Button Panel
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         buttonPanel.setBackground(MESSAGE_PANEL_COLOR);
         okButton = createStyledButton("OK", "Close Settings");
         styleButton(okButton);
         addHoverEffects(okButton);
-    
+
         okButton.addActionListener(e -> settingsDialog.dispose());
-    
+
         buttonPanel.add(okButton);
         settingsPanel.add(buttonPanel);
-    
+
         settingsDialog.add(settingsPanel, BorderLayout.CENTER);
         settingsDialog.setVisible(true);
     }
@@ -794,20 +803,20 @@ private String toCodePoint(String emoji) {
             protected void paintComponent(Graphics g) {
                 Graphics2D g2d = (Graphics2D) g;
                 g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                
+
                 if (isEnabled()) {
                     GradientPaint gradient = new GradientPaint(
-                        0, 0, new Color(THEME_COLOR.getRed(), THEME_COLOR.getGreen(), THEME_COLOR.getBlue(), 100), 
-                        getWidth(), 0, new Color(THEME_SECONDARY.getRed(), THEME_SECONDARY.getGreen(), THEME_SECONDARY.getBlue(), 100)
-                    );
+                            0, 0, new Color(THEME_COLOR.getRed(), THEME_COLOR.getGreen(), THEME_COLOR.getBlue(), 100),
+                            getWidth(), 0, new Color(THEME_SECONDARY.getRed(), THEME_SECONDARY.getGreen(),
+                                    THEME_SECONDARY.getBlue(), 100));
                     g2d.setPaint(gradient);
                     g2d.fillRoundRect(0, 0, getWidth(), getHeight(), 15, 15);
                 }
-                
+
                 super.paintComponent(g);
             }
         };
-        
+
         button.setToolTipText(tooltip);
         button.setForeground(Color.WHITE);
         button.setBorder(new EmptyBorder(5, 15, 5, 15));
@@ -815,7 +824,7 @@ private String toCodePoint(String emoji) {
         button.setContentAreaFilled(false);
         button.setBorderPainted(false);
         button.setBackground(new Color(0, 0, 0, 0));
-        
+
         return button;
     }
 
@@ -826,21 +835,19 @@ private String toCodePoint(String emoji) {
         button.setFocusPainted(false);
         button.setBackground(new Color(0, 0, 0, 0));
         button.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        
+
         if (button.getIcon() != null) {
             button.setBorder(new EmptyBorder(5, 5, 5, 5));
         }
     }
 
     private void styleTextField(JTextField field) {
-        Font font = getEmojiFont(14);
-        field.setFont(font);
+        applyEmojiTextFieldUI(field);
+
+        field.setFont(DEFAULT_FONT);
         field.setBorder(new EmptyBorder(5, 10, 5, 10));
         field.setOpaque(false);
-    
-        field.setText("Type a message");
-        field.setForeground(new Color(150, 150, 150));
-    
+
         field.addFocusListener(new FocusAdapter() {
             @Override
             public void focusGained(FocusEvent e) {
@@ -849,7 +856,7 @@ private String toCodePoint(String emoji) {
                     field.setForeground(Color.BLACK);
                 }
             }
-    
+
             @Override
             public void focusLost(FocusEvent e) {
                 if (field.getText().isEmpty()) {
@@ -858,35 +865,175 @@ private String toCodePoint(String emoji) {
                 }
             }
         });
-    
-        field.addKeyListener(new KeyAdapter() {
+    }
+
+    private void applyEmojiTextFieldUI(JTextField field) {
+        field.setUI(new BasicTextFieldUI() {
             @Override
-            public void keyPressed(KeyEvent e) {
+            protected void paintSafely(Graphics g) {
+                Graphics2D g2 = (Graphics2D) g;
+                g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                        RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+                g2.setColor(new Color(255, 255, 255, 200));
+                g2.fillRoundRect(0, 0, field.getWidth(), field.getHeight(), 10, 10);
+
+                int caretX = paintTextWithEmojis(g2);
+
+                if (field.isEditable() && field.isEnabled()) {
+                    paintCaret(g2, caretX);
+                }
+
+                if (field.getBorder() != null) {
+                    field.getBorder().paintBorder(field, g, 0, 0,
+                            field.getWidth(), field.getHeight());
+                }
+            }
+
+            private int paintTextWithEmojis(Graphics2D g2) {
+                String text = field.getText();
+                int caretPosition = field.getCaretPosition();
+                int x = 5;
+                int lastPos = 0;
+
+                if (text.isEmpty() || text.equals("Type a message")) {
+                    g2.setColor(new Color(150, 150, 150));
+                    g2.setFont(DEFAULT_FONT);
+                    g2.drawString("Type a message", x,
+                            field.getBaseline(field.getWidth(), field.getHeight()));
+                    return x;
+                }
+
+                Matcher matcher = EMOJI_PATTERN.matcher(text);
+                while (matcher.find()) {
+                    if (lastPos < matcher.start()) {
+                        String regularText = text.substring(lastPos, matcher.start());
+                        g2.setFont(DEFAULT_FONT);
+                        g2.setColor(Color.BLACK);
+                        x += drawString(g2, regularText, x,
+                                field.getBaseline(field.getWidth(), field.getHeight()));
+                    }
+
+                    if (caretPosition >= lastPos && caretPosition < matcher.start()) {
+                        return x;
+                    }
+
+                    String emojiSequence = matcher.group();
+                    int sequenceLength = emojiSequence.length();
+                    int pos = 0;
+
+                    while (pos < sequenceLength) {
+                        int emojiLength = 2;
+                        if (pos + 3 < sequenceLength &&
+                                emojiSequence.charAt(pos) == '\uD83C' &&
+                                emojiSequence.charAt(pos + 1) >= '\uDDE6' &&
+                                emojiSequence.charAt(pos + 1) <= '\uDDFF') {
+                            emojiLength = 4;
+                        }
+                        emojiLength = Math.min(emojiLength, sequenceLength - pos);
+                        String currentEmoji = emojiSequence.substring(pos, pos + emojiLength);
+
+                        ImageIcon emojiIcon = getTwemojiImage(currentEmoji);
+                        if (emojiIcon != null) {
+                            int yOffset = (field.getFontMetrics(DEFAULT_FONT).getAscent() - emojiIcon.getIconHeight())
+                                    / 2;
+                            g2.drawImage(emojiIcon.getImage(),
+                                    x,
+                                    field.getBaseline(field.getWidth(), field.getHeight()) - emojiIcon.getIconHeight()
+                                            + yOffset,
+                                    emojiIcon.getIconWidth(),
+                                    emojiIcon.getIconHeight(),
+                                    null);
+                            x += emojiIcon.getIconWidth();
+                        } else {
+                            g2.setFont(getEmojiFont(field.getFont().getSize()));
+                            g2.setColor(Color.BLACK);
+                            x += drawString(g2, currentEmoji, x,
+                                    field.getBaseline(field.getWidth(), field.getHeight()));
+                        }
+                        pos += emojiLength;
+                    }
+
+                    lastPos = matcher.end();
+
+                    if (caretPosition >= matcher.start() && caretPosition < lastPos) {
+                        return x;
+                    }
+                }
+
+                if (lastPos < text.length()) {
+                    String remainingText = text.substring(lastPos);
+                    g2.setFont(DEFAULT_FONT);
+                    g2.setColor(Color.BLACK);
+                    x += drawString(g2, remainingText, x,
+                            field.getBaseline(field.getWidth(), field.getHeight()));
+                }
+
+                if (caretPosition >= text.length()) {
+                    return x;
+                }
+
+                return x;
+            }
+
+            private int drawString(Graphics2D g2, String text, int x, int y) {
+                FontMetrics fm = g2.getFontMetrics();
+                g2.drawString(text, x, y);
+                return fm.stringWidth(text);
+            }
+
+            private void paintCaret(Graphics2D g2, int caretX) {
+                try {
+                    int baseline = field.getBaseline(field.getWidth(), field.getHeight());
+                    FontMetrics fm = g2.getFontMetrics();
+                    int caretHeight = fm.getAscent() + fm.getDescent();
+                    g2.setColor(Color.BLACK);
+                    g2.fillRect(caretX, baseline - fm.getAscent(), 2, caretHeight);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+
+        field.setFont(DEFAULT_FONT);
+        field.setBorder(new EmptyBorder(5, 10, 5, 10));
+        field.setOpaque(false);
+
+        field.addFocusListener(new FocusAdapter() {
+            @Override
+            public void focusGained(FocusEvent e) {
                 if (field.getText().equals("Type a message")) {
                     field.setText("");
                     field.setForeground(Color.BLACK);
                 }
             }
+
+            @Override
+            public void focusLost(FocusEvent e) {
+                if (field.getText().isEmpty()) {
+                    field.setText("Type a message");
+                    field.setForeground(new Color(150, 150, 150));
+                }
+            }
         });
     }
-    
+
     private void addHoverEffects(AbstractButton button) {
         button.addMouseListener(new MouseAdapter() {
             private Color originalFg = button.getForeground();
-            
+
             public void mouseEntered(MouseEvent evt) {
                 if (button.getIcon() != null) {
                     button.setBackground(new Color(
-                        THEME_COLOR.getRed(),
-                        THEME_COLOR.getGreen(),
-                        THEME_COLOR.getBlue(),
-                        50
-                    ));
+                            THEME_COLOR.getRed(),
+                            THEME_COLOR.getGreen(),
+                            THEME_COLOR.getBlue(),
+                            50));
                     button.setOpaque(true);
                 }
                 button.setForeground(THEME_COLOR.darker());
             }
-            
+
             public void mouseExited(MouseEvent evt) {
                 if (button.getIcon() != null) {
                     button.setOpaque(false);
@@ -894,27 +1041,25 @@ private String toCodePoint(String emoji) {
                 }
                 button.setForeground(originalFg);
             }
-    
+
             public void mousePressed(MouseEvent evt) {
                 if (button.getIcon() != null) {
                     button.setBackground(new Color(
-                        THEME_COLOR.getRed(),
-                        THEME_COLOR.getGreen(),
-                        THEME_COLOR.getBlue(),
-                        100
-                    ));
+                            THEME_COLOR.getRed(),
+                            THEME_COLOR.getGreen(),
+                            THEME_COLOR.getBlue(),
+                            100));
                 }
                 button.setForeground(THEME_COLOR.darker().darker());
             }
-    
+
             public void mouseReleased(MouseEvent evt) {
                 if (button.getIcon() != null) {
                     button.setBackground(new Color(
-                        THEME_COLOR.getRed(),
-                        THEME_COLOR.getGreen(),
-                        THEME_COLOR.getBlue(),
-                        50
-                    ));
+                            THEME_COLOR.getRed(),
+                            THEME_COLOR.getGreen(),
+                            THEME_COLOR.getBlue(),
+                            50));
                 }
                 button.setForeground(THEME_COLOR.darker());
             }
@@ -942,15 +1087,19 @@ private String toCodePoint(String emoji) {
         String message = messageField.getText().trim();
         if (!message.isEmpty() && !message.equals("Type a message")) {
             try {
-                service.broadcastMessage(name, message);
+                if (currentRecipient != null) {
+                    service.sendPrivateMessage(name, currentRecipient, message);
+                } else {
+                    service.broadcastMessage(name, message);
+                }
                 messageField.setText("");
             } catch (RemoteException e) {
-                displayMessage("ERROR", "Failed to send message: " + e.getMessage());
+                displayMessage("ERROR", "Failed to send message: " + e.getMessage(), false);
             }
         }
     }
 
-    public void displayMessage(String sender, String message) {
+    public void displayMessage(String sender, String message, boolean isPrivate) {
         SwingUtilities.invokeLater(() -> {
             StyledDocument doc = chatArea.getStyledDocument();
             try {
@@ -966,8 +1115,9 @@ private String toCodePoint(String emoji) {
                     doc.insertString(doc.getLength(), "[" + time + "] ", doc.getStyle("Time"));
                     doc.insertString(doc.getLength(), message, doc.getStyle("Server"));
                 } else {
+                    Style senderStyle = isPrivate ? doc.getStyle("PrivateUser") : doc.getStyle("User");
                     doc.insertString(doc.getLength(), "[" + time + "] ", doc.getStyle("Time"));
-                    doc.insertString(doc.getLength(), sender + ": ", doc.getStyle("User"));
+                    doc.insertString(doc.getLength(), sender + ": ", senderStyle);
                     insertMessageWithEmojis(doc, message);
                 }
 
@@ -976,8 +1126,10 @@ private String toCodePoint(String emoji) {
                 if (!sender.equals(name) && !sender.equals("SERVER")) {
                     playMessageSound();
                     if (notificationsEnabled && (getExtendedState() == ICONIFIED || !isActive())) {
-                        NotificationUtil.showNotification("New message from " + sender, 
-                            message.length() > 20 ? message.substring(0, 20) + "..." : message);
+                        String notificationMsg = isPrivate ? "Private message from " + sender
+                                : "New message from " + sender;
+                        NotificationUtil.showNotification(notificationMsg,
+                                message.length() > 20 ? message.substring(0, 20) + "..." : message);
                     }
                 }
             } catch (BadLocationException e) {
@@ -989,34 +1141,55 @@ private String toCodePoint(String emoji) {
     private void insertMessageWithEmojis(StyledDocument doc, String message) throws BadLocationException {
         Matcher matcher = EMOJI_PATTERN.matcher(message);
         int lastPos = 0;
-        
+
         while (matcher.find()) {
             if (lastPos < matcher.start()) {
-                doc.insertString(doc.getLength(), 
-                    message.substring(lastPos, matcher.start()), 
-                    doc.getStyle("Message"));
+                doc.insertString(doc.getLength(),
+                        message.substring(lastPos, matcher.start()),
+                        doc.getStyle("Message"));
             }
-            
-            String emoji = matcher.group();
-            ImageIcon emojiIcon = getTwemojiImage(emoji);
-            
-            if (emojiIcon != null) {
-                Style emojiStyle = doc.addStyle("Twemoji", null);
-                StyleConstants.setIcon(emojiStyle, emojiIcon);
-                doc.insertString(doc.getLength(), " ", emojiStyle);
-            } else {
-                Style fallbackStyle = doc.addStyle("EmojiFallback", doc.getStyle("Message"));
-                StyleConstants.setFontFamily(fallbackStyle, getEmojiFont(14).getFamily());
-                doc.insertString(doc.getLength(), emoji, fallbackStyle);
+
+            String emojiSequence = matcher.group();
+            int sequenceLength = emojiSequence.length();
+            int pos = 0;
+
+            while (pos < sequenceLength) {
+                int emojiLength = 2;
+                if (pos + 3 < sequenceLength &&
+                        emojiSequence.charAt(pos) == '\uD83C' &&
+                        emojiSequence.charAt(pos + 1) >= '\uDDE6' &&
+                        emojiSequence.charAt(pos + 1) <= '\uDDFF') {
+                    emojiLength = 4;
+                }
+                emojiLength = Math.min(emojiLength, sequenceLength - pos);
+                String currentEmoji = emojiSequence.substring(pos, pos + emojiLength);
+
+                ImageIcon emojiIcon = getTwemojiImage(currentEmoji);
+                if (emojiIcon != null) {
+                    Image img = emojiIcon.getImage();
+                    int size = DEFAULT_FONT.getSize() + 2;
+                    Image scaledImg = img.getScaledInstance(size, size, Image.SCALE_SMOOTH);
+                    emojiIcon = new ImageIcon(scaledImg);
+
+                    Style emojiStyle = doc.addStyle("Twemoji", null);
+                    StyleConstants.setIcon(emojiStyle, emojiIcon);
+                    doc.insertString(doc.getLength(), " ", emojiStyle);
+                } else {
+                    Style fallbackStyle = doc.addStyle("EmojiFallback", doc.getStyle("Message"));
+                    StyleConstants.setFontFamily(fallbackStyle, getEmojiFont(DEFAULT_FONT.getSize()).getFamily());
+                    doc.insertString(doc.getLength(), currentEmoji, fallbackStyle);
+                }
+
+                pos += emojiLength;
             }
-            
+
             lastPos = matcher.end();
         }
-        
+
         if (lastPos < message.length()) {
-            doc.insertString(doc.getLength(), 
-                message.substring(lastPos), 
-                doc.getStyle("Message"));
+            doc.insertString(doc.getLength(),
+                    message.substring(lastPos),
+                    doc.getStyle("Message"));
         }
     }
 
@@ -1084,7 +1257,8 @@ private String toCodePoint(String emoji) {
                 label.setText(item.getUsername());
                 label.setIcon(item.isOnline() ? ONLINE_ICON : OFFLINE_ICON);
                 if (isSelected) {
-                    label.setBackground(new Color(THEME_COLOR.getRed(), THEME_COLOR.getGreen(), THEME_COLOR.getBlue(), 150));
+                    label.setBackground(
+                            new Color(THEME_COLOR.getRed(), THEME_COLOR.getGreen(), THEME_COLOR.getBlue(), 150));
                     label.setForeground(Color.WHITE);
                 } else {
                     label.setBackground(Color.WHITE);
