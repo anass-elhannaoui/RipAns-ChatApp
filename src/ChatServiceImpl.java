@@ -33,11 +33,32 @@ public class ChatServiceImpl extends UnicastRemoteObject implements ChatService 
         
         System.out.println("Username changed from " + oldName + " to " + newName);
     }
+
     @Override
     public synchronized void registerClient(String name, ClientCallback callback) throws RemoteException {
+        // Clean up inactive clients
+        List<String> inactiveClients = new ArrayList<>();
+        for (Map.Entry<String, ClientCallback> entry : clients.entrySet()) {
+            try {
+                // Try to ping the existing client to check if it's still active
+                entry.getValue().ping();
+            } catch (RemoteException e) {
+                // If an exception is thrown, this client is no longer active
+                inactiveClients.add(entry.getKey());
+            }
+        }
+
+        // Remove inactive clients
+        for (String inactiveName : inactiveClients) {
+            clients.remove(inactiveName);
+        }
+
+        // Now check if the name is still in the map
         if (clients.containsKey(name)) {
             throw new RemoteException("Name already taken. Please choose another name.");
         }
+
+        // If the name is not in use, register the new client
         clients.put(name, callback);
         System.out.println("New client registered: " + name);
         broadcastMessage("SERVER", name + " has joined the chat.");

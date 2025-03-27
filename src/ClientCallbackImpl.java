@@ -6,7 +6,7 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
     private ChatClient chatClient;
     private ChatClientGUI chatClientGUI;
     private boolean isGUI;
-    
+
     // Constructor for console client
     public ClientCallbackImpl(ChatClient client) throws RemoteException {
         super();
@@ -14,7 +14,7 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
         this.chatClientGUI = null;
         this.isGUI = false;
     }
-    
+
     // Constructor for GUI client
     public ClientCallbackImpl(ChatClientGUI clientGUI) throws RemoteException {
         super();
@@ -22,7 +22,7 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
         this.chatClientGUI = clientGUI;
         this.isGUI = true;
     }
-    
+
     @Override
     public void receiveMessage(String sender, String message) throws RemoteException {
         if (isGUI) {
@@ -31,7 +31,7 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
             chatClient.displayMessage(sender, message);
         }
     }
-    
+
     @Override
     public void updateClientList(List<String> clients) throws RemoteException {
         if (isGUI) {
@@ -39,5 +39,11 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
         } else {
             chatClient.updateClientList(clients);
         }
+    }
+
+    @Override
+    public void ping() throws RemoteException {
+        // This method is intentionally empty
+        // It exists solely to check if the RMI connection is still alive
     }
 }
