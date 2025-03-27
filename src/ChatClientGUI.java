@@ -72,6 +72,7 @@ public class ChatClientGUI extends JFrame {
 
     public ChatClientGUI(String name, String serverIP) {
         this.name = name;
+        applyTheme("Ocean Wave");
         initializeUI();
         setAppIcon();
         connectToServer(serverIP);
@@ -307,8 +308,13 @@ public class ChatClientGUI extends JFrame {
         emojiPanel.setPreferredSize(new Dimension(getWidth(), 90));
         emojiPanel.setVisible(false);
     
-        String[] emojis = { "😀", "😃", "❤️", "👍", "🎉", "🔥", "👋", "😊",
-                          "😎", "🤔", "😕", "😢", "🥰", "🙏", "💔", "✨" };
+        String[] emojis = {
+            "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", // Smileys
+            "😊", "😇", "🙂", "🙃", "😉", "😌", "😍", "🥰", // Positive
+            "😘", "😗", "😙", "😚", "😋", "😛", "😝", "😜", // Kiss/face
+            "🤪", "🤨", "🧐", "🤓", "😎", "🥸", "🤩", "🥳", // Other faces
+            
+        };
     
         for (String emoji : emojis) {
             ImageIcon emojiIcon = getTwemojiImage(emoji);
@@ -564,27 +570,39 @@ private String toCodePoint(String emoji) {
     private void applyTheme(String theme) {
         switch (theme) {
             case "Ocean Wave":
-                THEME_COLOR = new Color(0, 150, 255);
-                THEME_SECONDARY = new Color(0, 200, 255);
-                BACKGROUND_COLOR = new Color(230, 245, 255);
-                MESSAGE_PANEL_COLOR = new Color(210, 235, 255);
-                currentGradient = new GradientPaint(0, 0, new Color(0, 180, 255), getWidth(), 0, new Color(0, 120, 200));
+                THEME_COLOR = new Color(100, 140, 235); // Softer blue
+                THEME_SECONDARY = new Color(80, 120, 215); // Subtle blue secondary
+                BACKGROUND_COLOR = new Color(235, 245, 255); // Lighter sky blue background
+                MESSAGE_PANEL_COLOR = new Color(225, 235, 245); // Slightly darker light blue
+                currentGradient = new GradientPaint(0, 0, new Color(90, 120, 205), getWidth(), 0, new Color(70, 100, 180));
                 break;
-                
             case "Emerald Forest":
-                THEME_COLOR = new Color(0, 180, 120);
-                THEME_SECONDARY = new Color(0, 150, 100);
-                BACKGROUND_COLOR = new Color(230, 255, 240);
-                MESSAGE_PANEL_COLOR = new Color(220, 250, 230);
-                currentGradient = new GradientPaint(0, 0, new Color(0, 200, 140), getWidth(), 0, new Color(0, 160, 110));
+                THEME_COLOR = new Color(80, 160, 100); // Softer green
+                THEME_SECONDARY = new Color(60, 120, 80); // Subtle green secondary
+                BACKGROUND_COLOR = new Color(230, 245, 230); // Lighter green background
+                MESSAGE_PANEL_COLOR = new Color(210, 230, 220); // Slightly darker light green
+                currentGradient = new GradientPaint(0, 0, new Color(70, 140, 90), getWidth(), 0, new Color(50, 100, 70));
                 break;
-                
-            case "Purple Haze":
-                THEME_COLOR = new Color(150, 50, 200);
-                THEME_SECONDARY = new Color(200, 50, 150);
-                BACKGROUND_COLOR = new Color(245, 230, 255);
-                MESSAGE_PANEL_COLOR = new Color(235, 220, 250);
-                currentGradient = new GradientPaint(0, 0, new Color(170, 70, 220), getWidth(), 0, new Color(220, 70, 170));
+            case "Neutral Gray":
+                THEME_COLOR = new Color(128, 128, 128);
+                THEME_SECONDARY = new Color(100, 100, 100);
+                BACKGROUND_COLOR = new Color(240, 240, 240);
+                MESSAGE_PANEL_COLOR = new Color(230, 230, 230);
+                currentGradient = new GradientPaint(0, 0, new Color(150, 150, 150), getWidth(), 0, new Color(100, 100, 100));
+                break;
+            case "Soft Twilight":
+                THEME_COLOR = new Color(100, 100, 200);
+                THEME_SECONDARY = new Color(80, 80, 180);
+                BACKGROUND_COLOR = new Color(240, 240, 250);
+                MESSAGE_PANEL_COLOR = new Color(230, 230, 240);
+                currentGradient = new GradientPaint(0, 0, new Color(100, 100, 200), getWidth(), 0, new Color(80, 80, 180));
+                break;
+            case "Graphite Echo":
+                THEME_COLOR = new Color(100, 100, 120);
+                THEME_SECONDARY = new Color(80, 80, 100);
+                BACKGROUND_COLOR = new Color(230, 230, 235);
+                MESSAGE_PANEL_COLOR = new Color(220, 220, 225);
+                currentGradient = new GradientPaint(0, 0, new Color(100, 100, 120), getWidth(), 0, new Color(80, 80, 100));
                 break;
         }
         needsFullUIUpdate = true;
@@ -683,7 +701,9 @@ private String toCodePoint(String emoji) {
         themeLabel.setFont(DEFAULT_FONT);
         String[] themes = { 
             "Ocean Wave", "Emerald Forest", 
-            "Purple Haze"
+             "Neutral Gray", 
+            "Soft Twilight",
+            "Graphite Echo"
         };
         JComboBox<String> themeCombo = new JComboBox<>(themes);
         themeCombo.setFont(DEFAULT_FONT);
