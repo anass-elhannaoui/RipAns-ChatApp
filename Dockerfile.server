@@ -1,0 +1,17 @@
+# Use JDK 21
+FROM openjdk:21
+
+# Set working directory
+WORKDIR /app
+
+# Copy compiled class files
+COPY ./bin/ /app/
+
+# Copy RMI policy file from src
+COPY ./src/policy/server.policy /app/server.policy
+
+# Expose RMI default port
+EXPOSE 1099
+
+# Run the server, referencing container name as hostname
+CMD ["java", "-Djava.security.policy=server.policy", "-Djava.rmi.server.hostname=rmi-server", "ChatServer"]
