@@ -83,6 +83,16 @@ public class ChatClientGUI extends JFrame {
         setupUserListContextMenu();
     }
 
+    public ChatClientGUI() {
+        // Initialize with default values that will be set by login dialog
+        this.name = "";
+        applyTheme("Ocean Wave"); // Or your default theme
+        initializeUI();
+        setAppIcon();
+        NotificationUtil.initTrayIcon(this);
+        setupUserListContextMenu();
+    }
+
     private void setAppIcon() {
         try {
             Image icon = ImageIO.read(getClass().getResource("/assets/logo.png"));
@@ -1316,14 +1326,135 @@ private String toCodePoint(String emoji) {
             return label;
         }
     }
-
+    public void showLoginDialog() {
+        // Create a custom dialog
+        JDialog loginDialog = new JDialog((JFrame) null, "Login to Chat", true);
+        loginDialog.setSize(400, 250);
+        loginDialog.setLocationRelativeTo(null);
+        loginDialog.setLayout(new BorderLayout());
+        loginDialog.getContentPane().setBackground(BACKGROUND_COLOR);
+    
+        // Header panel with gradient (using instance variables)
+        JPanel headerPanel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2d = (Graphics2D) g;
+                g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                GradientPaint gradient = new GradientPaint(
+                        0, 0, THEME_COLOR,
+                        getWidth(), 0, THEME_SECONDARY);
+                g2d.setPaint(gradient);
+                g2d.fillRect(0, 0, getWidth(), getHeight());
+            }
+        };
+        headerPanel.setPreferredSize(new Dimension(400, 50));
+        headerPanel.setLayout(new BorderLayout());
+        headerPanel.setBorder(new EmptyBorder(0, 20, 0, 20));
+    
+        JLabel titleLabel = new JLabel("Welcome to RMI Chat", SwingConstants.CENTER);
+        titleLabel.setForeground(Color.WHITE);
+        titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
+        headerPanel.add(titleLabel, BorderLayout.CENTER);
+    
+        // Main content panel
+        JPanel contentPanel = new JPanel(new GridBagLayout());
+        contentPanel.setBackground(BACKGROUND_COLOR);
+        contentPanel.setBorder(new EmptyBorder(20, 30, 20, 30));
+    
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(10, 10, 10, 10);
+        gbc.anchor = GridBagConstraints.WEST;
+    
+        // Username field
+        JLabel usernameLabel = new JLabel("Username:");
+        usernameLabel.setFont(DEFAULT_FONT);
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        contentPanel.add(usernameLabel, gbc);
+    
+        JTextField usernameField = new JTextField(15);
+        styleTextField(usernameField); // Using instance method
+        usernameField.setFont(DEFAULT_FONT);
+        gbc.gridx = 1;
+        gbc.gridy = 0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        contentPanel.add(usernameField, gbc);
+    
+        // Server IP field
+        JLabel serverLabel = new JLabel("Server IP:");
+        serverLabel.setFont(DEFAULT_FONT);
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        gbc.fill = GridBagConstraints.NONE;
+        contentPanel.add(serverLabel, gbc);
+    
+        JTextField serverIPField = new JTextField("localhost", 15);
+        styleTextField(serverIPField); // Using instance method
+        serverIPField.setFont(DEFAULT_FONT);
+        gbc.gridx = 1;
+        gbc.gridy = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        contentPanel.add(serverIPField, gbc);
+    
+        // Button panel
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 0));
+        buttonPanel.setBackground(BACKGROUND_COLOR);
+        buttonPanel.setBorder(new EmptyBorder(10, 0, 0, 0));
+    
+        JButton loginButton = new JButton("Login");
+        styleButton(loginButton); // Using instance method
+        loginButton.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        loginButton.setPreferredSize(new Dimension(100, 35));
+        loginButton.addActionListener(e -> {
+            String username = usernameField.getText().trim();
+            String serverIP = serverIPField.getText().trim();
+    
+            if (!username.isEmpty() && !serverIP.isEmpty()) {
+                loginDialog.dispose();
+                this.name = username; // Set the instance username
+                connectToServer(serverIP); // Use instance method
+                setTitle("RMI Chat - " + username); // Update window title
+            } else {
+                JOptionPane.showMessageDialog(loginDialog,
+                        "Please enter both username and server IP",
+                        "Error",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+        });
+    
+        JButton cancelButton = new JButton("Cancel");
+        styleButton(cancelButton); // Using instance method
+        cancelButton.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        cancelButton.setPreferredSize(new Dimension(100, 35));
+        cancelButton.addActionListener(e -> System.exit(0));
+    
+        buttonPanel.add(loginButton);
+        buttonPanel.add(cancelButton);
+    
+        // Add all components to dialog
+        loginDialog.add(headerPanel, BorderLayout.NORTH);
+        loginDialog.add(contentPanel, BorderLayout.CENTER);
+        loginDialog.add(buttonPanel, BorderLayout.SOUTH);
+    
+        // Make Enter key trigger login
+        loginDialog.getRootPane().setDefaultButton(loginButton);
+    
+        // Center and show dialog
+        loginDialog.pack();
+        loginDialog.setVisible(true);
+    }
+   
     public static void main(String[] args) {
-        if (args.length < 2) {
-            System.out.println("Usage: java ChatClientGUI <username> <server-ip>");
-            System.exit(1);
-        }
-        String name = args[0];
-        String serverIP = args[1];
-        SwingUtilities.invokeLater(() -> new ChatClientGUI(name, serverIP));
+        SwingUtilities.invokeLater(() -> {
+            if (args.length >= 2) {
+                // If arguments provided, use them directly
+                new ChatClientGUI(args[0], args[1]);
+            } else {
+                // Create instance without initialization, show login dialog
+                ChatClientGUI client = new ChatClientGUI();
+                client.showLoginDialog();
+            }
+        });
     }
 }
