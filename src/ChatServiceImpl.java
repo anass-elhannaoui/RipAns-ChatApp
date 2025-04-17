@@ -7,32 +7,29 @@ import java.util.Map;
 
 public class ChatServiceImpl extends UnicastRemoteObject implements ChatService {
     private Map<String, ClientCallback> clients;
+    private List<String> registeredNames; // For tracking all registered names if needed
 
     public ChatServiceImpl() throws RemoteException {
         super();
         clients = new HashMap<>();
+        registeredNames = new ArrayList<>();
         System.out.println("Chat Service started successfully");
     }
 
     @Override
-    public synchronized void changeUsername(String oldName, String newName) throws RemoteException {
-        if (clients.containsKey(newName)) {
-            throw new RemoteException("The username '" + newName + "' is already taken.");
-        }
-
-        ClientCallback callback = clients.remove(oldName);
-        clients.put(newName, callback);
-        broadcastMessage("SERVER", oldName + " has changed their username to " + newName);
-        updateClientListForAll();
-        System.out.println("Username changed from " + oldName + " to " + newName);
+    public synchronized boolean isUsernameTaken(String username) throws RemoteException {
+        // Check both connected clients and all registered names
+        return clients.containsKey(username) || registeredNames.contains(username);
     }
 
     @Override
     public synchronized void registerClient(String name, ClientCallback callback) throws RemoteException {
-        if (clients.containsKey(name)) {
-            throw new RemoteException("Name already taken. Please choose another name.");
+        if (isUsernameTaken(name)) {
+            throw new RemoteException("Name '" + name + "' is already taken. Please choose another name.");
         }
+        
         clients.put(name, callback);
+        registeredNames.add(name); // Add to permanent registry
         System.out.println("New client registered: " + name);
         broadcastMessage("SERVER", name + " has joined the chat.");
         updateClientListForAll();
@@ -44,6 +41,22 @@ public class ChatServiceImpl extends UnicastRemoteObject implements ChatService 
         System.out.println("Client unregistered: " + name);
         broadcastMessage("SERVER", name + " has left the chat.");
         updateClientListForAll();
+    }
+
+    @Override
+    public synchronized void changeUsername(String oldName, String newName) throws RemoteException {
+        if (isUsernameTaken(newName)) {
+            throw new RemoteException("The username '" + newName + "' is already taken.");
+        }
+
+        ClientCallback callback = clients.remove(oldName);
+        registeredNames.remove(oldName);
+        clients.put(newName, callback);
+        registeredNames.add(newName);
+        
+        broadcastMessage("SERVER", oldName + " has changed their username to " + newName);
+        updateClientListForAll();
+        System.out.println("Username changed from " + oldName + " to " + newName);
     }
 
     @Override
@@ -86,6 +99,7 @@ public class ChatServiceImpl extends UnicastRemoteObject implements ChatService 
             }
         } catch (RemoteException e) {
             clients.remove(recipient);
+            registeredNames.remove(recipient);
             updateClientListForAll();
             throw new RemoteException("Failed to send private message: " + e.getMessage());
         }

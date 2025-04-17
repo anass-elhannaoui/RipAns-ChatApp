@@ -570,18 +570,20 @@ private String toCodePoint(String emoji) {
             System.setProperty("java.security.policy", "client.policy");
             Registry registry = LocateRegistry.getRegistry(serverIP, 1099);
             service = (ChatService) registry.lookup("ChatService");
+            
+            // Check if username is available first
+            if (service.isUsernameTaken(name)) {
+                throw new RemoteException("Username '" + name + "' is already taken");
+            }
+            
             callback = new ClientCallbackImpl(this);
             service.registerClient(name, callback);
             displayMessage("SERVER", "Connected to chat server as " + name, false);
         } catch (RemoteException | NotBoundException e) {
-            JOptionPane.showMessageDialog(this,
-                    "Error connecting to server: " + e.getMessage(),
-                    "Connection Error",
-                    JOptionPane.ERROR_MESSAGE);
-            System.exit(1);
+            // Show error in the login dialog instead of creating a new one
+            throw new RuntimeException("Failed to connect: " + e.getMessage(), e);
         }
     }
-
     private void updateUI() {
         SwingUtilities.invokeLater(() -> {
             if (needsFullUIUpdate) {
@@ -1329,12 +1331,171 @@ private String toCodePoint(String emoji) {
     public void showLoginDialog() {
         // Create a custom dialog
         JDialog loginDialog = new JDialog((JFrame) null, "Login to Chat", true);
-        loginDialog.setSize(400, 250);
+        loginDialog.setSize(400, 300);
         loginDialog.setLocationRelativeTo(null);
         loginDialog.setLayout(new BorderLayout());
         loginDialog.getContentPane().setBackground(BACKGROUND_COLOR);
+        loginDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
     
-        // Header panel with gradient (using instance variables)
+        // Error label (initially invisible)
+        JLabel errorLabel = new JLabel(" ", SwingConstants.CENTER);
+        errorLabel.setForeground(new Color(200, 0, 0));
+        errorLabel.setFont(DEFAULT_FONT.deriveFont(Font.BOLD));
+    
+        // Header panel with gradient
+        JPanel headerPanel = createHeaderPanel("Welcome to RMI Chat");
+    
+        // Main content panel
+        JPanel contentPanel = new JPanel(new GridBagLayout());
+        contentPanel.setBackground(BACKGROUND_COLOR);
+        contentPanel.setBorder(new EmptyBorder(20, 30, 10, 30));
+    
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(10, 10, 10, 10);
+        gbc.anchor = GridBagConstraints.WEST;
+    
+        // Username field
+        JLabel usernameLabel = new JLabel("Username:");
+        usernameLabel.setFont(DEFAULT_FONT);
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        contentPanel.add(usernameLabel, gbc);
+    
+        JTextField usernameField = new JTextField(15);
+        styleTextField(usernameField);
+        usernameField.setFont(DEFAULT_FONT);
+        gbc.gridx = 1;
+        gbc.gridy = 0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        contentPanel.add(usernameField, gbc);
+    
+        // Server IP field
+        JLabel serverLabel = new JLabel("Server IP:");
+        serverLabel.setFont(DEFAULT_FONT);
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        gbc.fill = GridBagConstraints.NONE;
+        contentPanel.add(serverLabel, gbc);
+    
+        JTextField serverIPField = new JTextField("localhost", 15);
+        styleTextField(serverIPField);
+        serverIPField.setFont(DEFAULT_FONT);
+        gbc.gridx = 1;
+        gbc.gridy = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        contentPanel.add(serverIPField, gbc);
+    
+        // Button panel
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 0));
+        buttonPanel.setBackground(BACKGROUND_COLOR);
+        buttonPanel.setBorder(new EmptyBorder(10, 0, 0, 0));
+    
+        JButton loginButton = new JButton("Login");
+        styleButton(loginButton);
+        loginButton.setFont(new Font("Segoe UI", Font.BOLD, 14));
+        loginButton.setPreferredSize(new Dimension(100, 35));
+        
+        loginButton.addActionListener(e -> {
+            String username = usernameField.getText().trim();
+            String serverIP = serverIPField.getText().trim();
+    
+            // Clear previous errors
+            errorLabel.setText(" ");
+    
+            // Validate inputs
+            if (username.isEmpty()) {
+                errorLabel.setText("Username cannot be empty");
+                usernameField.requestFocus();
+                return;
+            }
+    
+            if (serverIP.isEmpty()) {
+                errorLabel.setText("Server IP cannot be empty");
+                serverIPField.requestFocus();
+                return;
+            }
+    
+            try {
+                System.setProperty("java.security.policy", "client.policy");
+                Registry registry = LocateRegistry.getRegistry(serverIP, 1099);
+                service = (ChatService) registry.lookup("ChatService");
+                
+                // Check if username is available
+                if (service.isUsernameTaken(username)) {
+                    errorLabel.setText("Username '" + username + "' is already taken");
+                    usernameField.setText("");
+                    usernameField.requestFocus();
+                    return;
+                }
+    
+                // Try to register client
+                callback = new ClientCallbackImpl(this);
+                service.registerClient(username, callback);
+                
+                // If successful, update UI and close dialog
+                this.name = username;
+                statusLabel.setText("Connected as: " + name);
+                setTitle("RMI Chat - " + name);
+                loginDialog.dispose();
+                
+                // Display welcome message
+                displayMessage("SERVER", "Connected to chat server as " + name, false);
+                
+            } catch (RemoteException ex) {
+                String errorMsg = getFriendlyError(ex);
+                errorLabel.setText(errorMsg);
+                JOptionPane.showMessageDialog(loginDialog, 
+                    "Connection error: " + errorMsg,
+                    "Connection Error",
+                    JOptionPane.ERROR_MESSAGE);
+            } catch (NotBoundException ex) {
+                errorLabel.setText("Chat service not found on server");
+            } catch (Exception ex) {
+                errorLabel.setText("Unexpected error: " + ex.getMessage());
+                ex.printStackTrace();
+            }
+        });
+    
+        JButton cancelButton = new JButton("Cancel");
+        styleButton(cancelButton);
+        cancelButton.setFont(new Font("Segoe UI", Font.PLAIN, 14));
+        cancelButton.setPreferredSize(new Dimension(100, 35));
+        cancelButton.addActionListener(e -> {
+            loginDialog.dispose();
+            System.exit(0);
+        });
+    
+        buttonPanel.add(loginButton);
+        buttonPanel.add(cancelButton);
+    
+        // Error panel
+        JPanel errorPanel = new JPanel(new BorderLayout());
+        errorPanel.setBackground(BACKGROUND_COLOR);
+        errorPanel.add(errorLabel, BorderLayout.CENTER);
+    
+        // Add all components to dialog
+        loginDialog.add(headerPanel, BorderLayout.NORTH);
+        loginDialog.add(contentPanel, BorderLayout.CENTER);
+        loginDialog.add(errorPanel, BorderLayout.SOUTH);
+        loginDialog.add(buttonPanel, BorderLayout.PAGE_END);
+    
+        // Make Enter key trigger login
+        loginDialog.getRootPane().setDefaultButton(loginButton);
+    
+        // Center and show dialog
+        loginDialog.pack();
+        loginDialog.setVisible(true);
+    }
+    private String getFriendlyError(RemoteException ex) {
+        if (ex.getMessage().contains("Connection refused")) {
+            return "Server not found or not running";
+        } else if (ex.getMessage().contains("Invalid IP")) {
+            return "Invalid server address";
+        }
+        return ex.getMessage();
+    }
+    
+    private JPanel createHeaderPanel(String title) {
         JPanel headerPanel = new JPanel() {
             @Override
             protected void paintComponent(Graphics g) {
@@ -1352,99 +1513,13 @@ private String toCodePoint(String emoji) {
         headerPanel.setLayout(new BorderLayout());
         headerPanel.setBorder(new EmptyBorder(0, 20, 0, 20));
     
-        JLabel titleLabel = new JLabel("Welcome to RMI Chat", SwingConstants.CENTER);
+        JLabel titleLabel = new JLabel(title, SwingConstants.CENTER);
         titleLabel.setForeground(Color.WHITE);
         titleLabel.setFont(new Font("Segoe UI", Font.BOLD, 18));
         headerPanel.add(titleLabel, BorderLayout.CENTER);
-    
-        // Main content panel
-        JPanel contentPanel = new JPanel(new GridBagLayout());
-        contentPanel.setBackground(BACKGROUND_COLOR);
-        contentPanel.setBorder(new EmptyBorder(20, 30, 20, 30));
-    
-        GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(10, 10, 10, 10);
-        gbc.anchor = GridBagConstraints.WEST;
-    
-        // Username field
-        JLabel usernameLabel = new JLabel("Username:");
-        usernameLabel.setFont(DEFAULT_FONT);
-        gbc.gridx = 0;
-        gbc.gridy = 0;
-        contentPanel.add(usernameLabel, gbc);
-    
-        JTextField usernameField = new JTextField(15);
-        styleTextField(usernameField); // Using instance method
-        usernameField.setFont(DEFAULT_FONT);
-        gbc.gridx = 1;
-        gbc.gridy = 0;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        contentPanel.add(usernameField, gbc);
-    
-        // Server IP field
-        JLabel serverLabel = new JLabel("Server IP:");
-        serverLabel.setFont(DEFAULT_FONT);
-        gbc.gridx = 0;
-        gbc.gridy = 1;
-        gbc.fill = GridBagConstraints.NONE;
-        contentPanel.add(serverLabel, gbc);
-    
-        JTextField serverIPField = new JTextField("localhost", 15);
-        styleTextField(serverIPField); // Using instance method
-        serverIPField.setFont(DEFAULT_FONT);
-        gbc.gridx = 1;
-        gbc.gridy = 1;
-        gbc.fill = GridBagConstraints.HORIZONTAL;
-        contentPanel.add(serverIPField, gbc);
-    
-        // Button panel
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 0));
-        buttonPanel.setBackground(BACKGROUND_COLOR);
-        buttonPanel.setBorder(new EmptyBorder(10, 0, 0, 0));
-    
-        JButton loginButton = new JButton("Login");
-        styleButton(loginButton); // Using instance method
-        loginButton.setFont(new Font("Segoe UI", Font.BOLD, 14));
-        loginButton.setPreferredSize(new Dimension(100, 35));
-        loginButton.addActionListener(e -> {
-            String username = usernameField.getText().trim();
-            String serverIP = serverIPField.getText().trim();
-    
-            if (!username.isEmpty() && !serverIP.isEmpty()) {
-                loginDialog.dispose();
-                this.name = username; // Set the instance username
-                connectToServer(serverIP); // Use instance method
-                setTitle("RMI Chat - " + username); // Update window title
-            } else {
-                JOptionPane.showMessageDialog(loginDialog,
-                        "Please enter both username and server IP",
-                        "Error",
-                        JOptionPane.ERROR_MESSAGE);
-            }
-        });
-    
-        JButton cancelButton = new JButton("Cancel");
-        styleButton(cancelButton); // Using instance method
-        cancelButton.setFont(new Font("Segoe UI", Font.PLAIN, 14));
-        cancelButton.setPreferredSize(new Dimension(100, 35));
-        cancelButton.addActionListener(e -> System.exit(0));
-    
-        buttonPanel.add(loginButton);
-        buttonPanel.add(cancelButton);
-    
-        // Add all components to dialog
-        loginDialog.add(headerPanel, BorderLayout.NORTH);
-        loginDialog.add(contentPanel, BorderLayout.CENTER);
-        loginDialog.add(buttonPanel, BorderLayout.SOUTH);
-    
-        // Make Enter key trigger login
-        loginDialog.getRootPane().setDefaultButton(loginButton);
-    
-        // Center and show dialog
-        loginDialog.pack();
-        loginDialog.setVisible(true);
+        
+        return headerPanel;
     }
-   
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
             if (args.length >= 2) {

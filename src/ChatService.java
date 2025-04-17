@@ -9,4 +9,5 @@ public interface ChatService extends Remote {
     void sendPrivateMessage(String sender, String recipient, String message) throws RemoteException;
     List<String> getActiveClients() throws RemoteException;
     void changeUsername(String oldName, String newName) throws RemoteException;
+    boolean isUsernameTaken(String username) throws RemoteException;
 }
