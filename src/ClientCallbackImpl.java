@@ -24,26 +24,18 @@ public class ClientCallbackImpl extends UnicastRemoteObject implements ClientCal
     @Override
     public void receiveMessage(String sender, String message, boolean isPrivate) throws RemoteException {
         if (isGUI) {
-            if (chatClientGUI != null) {
-                chatClientGUI.displayMessage(sender, message, isPrivate);
-            }
+            chatClientGUI.displayMessage(sender, message, isPrivate);
         } else {
-            if (chatClient != null) {
-                chatClient.displayMessage(sender, message);
-            }
+            chatClient.displayMessage(sender, message);
         }
     }
 
     @Override
     public void updateClientList(List<String> clients) throws RemoteException {
         if (isGUI) {
-            if (chatClientGUI != null) {
-                chatClientGUI.updateClientList(clients);
-            }
+            chatClientGUI.updateClientList(clients);
         } else {
-            if (chatClient != null) {
-                chatClient.updateClientList(clients);
-            }
+            chatClient.updateClientList(clients);
         }
     }
 }
